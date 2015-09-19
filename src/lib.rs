@@ -110,9 +110,7 @@ impl<'a,'b> Trainer<'a,'b>  {
     /// Specifies the learning rate to be used when training (default is `0.3`)
     /// This is the step size that is used in the backpropagation algorithm.
     pub fn rate(&mut self, rate: f64) -> &mut Trainer<'a,'b> {
-        if rate <= 0f64 {
-            panic!("the learning rate must be a positive number");
-        }
+        assert!(rate > 0.0, "the learning rate must be a positive number");
 
         self.rate = rate;
         self
@@ -120,9 +118,7 @@ impl<'a,'b> Trainer<'a,'b>  {
 
     /// Specifies the momentum to be used when training (default is `0.0`)
     pub fn momentum(&mut self, momentum: f64) -> &mut Trainer<'a,'b> {
-        if momentum <= 0f64 {
-            panic!("momentum must be positive");
-        }
+        assert!(momentum > 0.0, "momentum must be a positive number");
 
         self.momentum = momentum;
         self
@@ -149,13 +145,9 @@ impl<'a,'b> Trainer<'a,'b>  {
     /// elapsed.
     pub fn halt_condition(&mut self, halt_condition: HaltCondition) -> &mut Trainer<'a,'b> {
         match halt_condition {
-            Epochs(epochs) if epochs < 1 => {
-                panic!("must train for at least one epoch")
-            }
-            MSE(mse) if mse <= 0f64 => {
-                panic!("MSE must be greater than 0")
-            }
-            _ => ()
+            Epochs(epochs) => assert!(epochs > 0, "must train for at least one epoch"),
+            MSE(mse) => assert!(mse > 0.0, "MSE must be greater than 0"),
+            _ => {}
         }
 
         self.halt_condition = halt_condition;
@@ -200,16 +192,9 @@ impl NN {
     pub fn new(layers_sizes: &[u32]) -> NN {
         let mut rng = rand::thread_rng();
 
-        if layers_sizes.len() < 2 {
-            panic!("must have at least two layers");
-        }
+        assert!(layers_sizes.len() >= 2, "must have atleast two layers");
 
-        for &layer_size in layers_sizes.iter() {
-            if layer_size < 1 {
-                panic!("can't have any empty layers");
-            }
-        }
-
+        assert!(layers_sizes.iter().find(|x| &&0 == x).is_none(), "can't have any empty layers");
 
         let mut layers = Vec::new();
         let mut it = layers_sizes.iter();
