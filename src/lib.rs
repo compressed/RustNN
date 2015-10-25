@@ -397,28 +397,27 @@ impl NN {
 
             for (node_index, (node, &result)) in iter_zip_enum(layer_nodes, layer_results) {
                 let mut node_weight_updates = Vec::new();
-                let mut node_error;
 
                 // calculate error for this node
-                if layer_index == layers.len() - 1 {
-                    node_error = result * (1f64 - result) * (targets[node_index] - result);
-                } else {
-                    let mut sum = 0f64;
-                    let next_layer_errors = &network_errors[network_errors.len() - 1];
-                    for (next_node, &next_node_error_data) in next_layer_nodes.unwrap().iter().zip((next_layer_errors).iter()) {
-                        sum += next_node[node_index+1] * next_node_error_data; // +1 because the 0th weight is the threshold
+                let node_error = match layer_index {
+                    s if s == layers.len() -1 => result * (1f64 - result) * (targets[node_index] - result),
+                    _ => {
+                        let mut sum = 0f64;
+                        let next_layer_errors = &network_errors[network_errors.len() - 1];
+                        for (next_node, &next_node_error_data) in next_layer_nodes.unwrap().iter().zip((next_layer_errors).iter()) {
+                            sum += next_node[node_index+1] * next_node_error_data; // +1 because the 0th weight is the threshold
+                        }
+                        result * (1f64 - result) * sum
                     }
-                    node_error = result * (1f64 - result) * sum;
-                }
+                };
 
                 // calculate weight updates for this node
                 for weight_index in 0..node.len() {
-                    let mut prev_layer_result;
-                    if weight_index == 0 {
-                        prev_layer_result = 1f64; // threshold
-                    } else {
-                        prev_layer_result = prev_layer_results[weight_index-1];
-                    }
+                    let prev_layer_result = match weight_index {
+                        0 => 1f64, // threshold
+                        _ => prev_layer_results[weight_index-1],
+                    };
+
                     let weight_update = node_error * prev_layer_result;
                     node_weight_updates.push(weight_update);
                 }
