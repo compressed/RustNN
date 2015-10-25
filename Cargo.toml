@@ -1,21 +1,17 @@
 [package]
-
-name = "nn"
-version = "0.1.6"
 authors = ["Jack Montgomery <jackm321@gmail.com>"]
-repository = "https://github.com/jackm321/RustNN"
+description = "A multilayer feedforward backpropagation neural network library"
 documentation = "https://jackm321.github.io/RustNN/doc/nn/"
+keywords = ["nn", "neural-network", "classifier", "backpropagation", "machine-learning"]
 license = "Apache-2.0"
+name = "nn"
 readme = "README.md"
-
-description = """
-A multilayer feedforward backpropagation neural network library
-"""
-
-keywords = ["nn", "neural-network", "classifier", "backpropagation",
-            "machine-learning"]
+repository = "https://github.com/jackm321/RustNN"
+version = "0.1.6"
 
 [dependencies]
+crossbeam = "0.1.5"
 rand = "0.3.7"
 rustc-serialize = "0.3.12"
+simple_parallel = "0.3.0"
 time = "0.1.24"

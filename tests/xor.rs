@@ -35,3 +35,44 @@ fn xor_4layers() {
         assert!(result == key);
     }
 }
+
+#[test]
+fn xor_4layers_multithreaded() {
+    // create examples of the xor function
+    let examples = [
+        (vec![0f64, 0f64], vec![0f64]),
+        (vec![0f64, 1f64], vec![1f64]),
+        (vec![1f64, 0f64], vec![1f64]),
+        (vec![1f64, 1f64], vec![0f64]),
+        (vec![0f64, 0f64], vec![0f64]),
+        (vec![0f64, 1f64], vec![1f64]),
+        (vec![1f64, 0f64], vec![1f64]),
+        (vec![1f64, 1f64], vec![0f64]),
+        (vec![0f64, 0f64], vec![0f64]),
+        (vec![0f64, 1f64], vec![1f64]),
+        (vec![1f64, 0f64], vec![1f64]),
+        (vec![1f64, 1f64], vec![0f64]),
+        (vec![0f64, 0f64], vec![0f64]),
+        (vec![0f64, 1f64], vec![1f64]),
+        (vec![1f64, 0f64], vec![1f64]),
+        (vec![1f64, 1f64], vec![0f64]),
+    ];
+
+    // create a new neural network
+    let mut net1 = NN::new(&[2,3,3,1]);
+
+    // train the network
+    net1.train(&examples)
+        .halt_condition( HaltCondition::MSE(0.01) )
+        .learning_mode( LearningMode::Incremental )
+        .momentum(0.1)
+        .num_threads(4)
+        .go();
+
+    // test the trained network
+    for &(ref inputs, ref outputs) in examples.iter() {
+        let results = net1.run(inputs);
+        let (result, key) = (results[0].round(), outputs[0]);
+        assert!(result == key);
+    }
+}
