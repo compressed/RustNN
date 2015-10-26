@@ -383,20 +383,20 @@ impl NN {
 
     // calculates all weight updates by backpropagation
     fn calculate_weight_updates(&self, results: &Vec<Vec<f64>>, targets: &[f64]) -> Vec<Vec<Vec<f64>>> {
-        let mut network_errors:Vec<Vec<f64>> = Vec::new();
-        let mut network_weight_updates = Vec::new();
         let layers = &self.layers;
+        let mut network_errors:Vec<Vec<f64>> = Vec::with_capacity(layers.len());
+        let mut network_weight_updates = Vec::with_capacity(layers.len());
         let network_results = &results[1..]; // skip the input layer
         let mut next_layer_nodes: Option<&Vec<Vec<f64>>> = None;
 
         for (layer_index, (layer_nodes, layer_results)) in iter_zip_enum(layers, network_results).rev() {
             let prev_layer_results = &results[layer_index];
-            let mut layer_errors = Vec::new();
-            let mut layer_weight_updates = Vec::new();
+            let mut layer_errors = Vec::with_capacity(layer_results.len());
+            let mut layer_weight_updates = Vec::with_capacity(layer_results.len());
 
 
             for (node_index, (node, &result)) in iter_zip_enum(layer_nodes, layer_results) {
-                let mut node_weight_updates = Vec::new();
+                let mut node_weight_updates = Vec::with_capacity(node.len());
 
                 // calculate error for this node
                 let node_error = match layer_index {
@@ -433,7 +433,6 @@ impl NN {
 
         // updates were built by backpropagation so reverse them
         network_weight_updates.reverse();
-
         network_weight_updates
     }
 
