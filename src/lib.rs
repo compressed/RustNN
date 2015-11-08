@@ -241,7 +241,7 @@ impl NN {
             for _ in 0..layer_size {
                 let mut node: Vec<f64> = Vec::new();
                 for _ in 0..prev_layer_size+1 {
-                    let random_weight: f64 = rng.gen_range(-0.5f64, 0.5f64);
+                    let random_weight: f64 = rng.gen_range(-1.0f64, 1.0f64);
                     node.push(random_weight);
                 }
                 node.shrink_to_fit();
