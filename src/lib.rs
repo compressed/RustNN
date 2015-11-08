@@ -60,19 +60,26 @@ extern crate rustc_serialize;
 extern crate time;
 extern crate crossbeam;
 extern crate simple_parallel;
+extern crate env_logger;
+#[macro_use] extern crate log;
 
 use simple_parallel::Pool;
 use HaltCondition::{ Epochs, MSE, Timer };
-use LearningMode::{ Incremental };
+use LearningMode::{ Incremental, Chunk };
 use std::iter::{Zip, Enumerate};
 use std::slice;
 use rustc_serialize::json;
 use time::{ Duration, PreciseTime };
 use rand::Rng;
+use std::sync::RwLock;
 
 const DEFAULT_LEARNING_RATE: f64 = 0.3f64;
 const DEFAULT_MOMENTUM: f64 = 0f64;
 const DEFAULT_EPOCHS: u32 = 1000;
+/// Default chunk size for splitting examples up during multi-threaded training
+/// the larger this number, the more examples are tests before actually updating the weights
+/// of the model
+const DEFAULT_CHUNK_SIZE: usize = 10;
 
 /// Specifies when to stop training the network
 #[derive(Debug, Copy, Clone)]
@@ -85,11 +92,16 @@ pub enum HaltCondition {
     Timer(Duration),
 }
 
-/// Specifies which [learning mode](http://en.wikipedia.org/wiki/Backpropagation#Modes_of_learning) to use when training the network
+/// Specifies which [learning mode](http://en.wikipedia.org/wiki/Backpropagation#Modes_of_learning)
+/// to use when training the network
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum LearningMode {
     /// train the network Incrementally (updates weights after each example)
-    Incremental
+    Incremental,
+    /// train the network in chunks, weights are updated after each chunk has been procoessed
+    ///
+    /// This is useful during multi-threaded training
+    Chunk,
 }
 
 /// Used to specify options that dictate how a network will be trained
@@ -103,6 +115,9 @@ pub struct Trainer<'a,'b> {
     learning_mode: LearningMode,
     nn: &'a mut NN,
     num_threads: usize,
+    /// number of iterations to process in parallel before updating weights
+    /// useful in multi-threading
+    chunk_size: usize,
 }
 
 /// `Trainer` is used to chain together options that specify how to train a network.
@@ -170,6 +185,12 @@ impl<'a,'b> Trainer<'a,'b>  {
         self
     }
 
+    /// Specifies the number of threads to use for training
+    pub fn chunk_size(&mut self, chunk_size: usize) -> &mut Trainer<'a,'b> {
+        self.chunk_size = chunk_size;
+        self
+    }
+
     /// When `go` is called, the network will begin training based on the
     /// options specified. If `go` does not get called, the network will not
     /// get trained!
@@ -181,6 +202,8 @@ impl<'a,'b> Trainer<'a,'b>  {
             self.log_interval,
             self.halt_condition,
             self.num_threads,
+            self.learning_mode,
+            self.chunk_size,
         )
     }
 
@@ -194,7 +217,6 @@ pub struct NN {
 }
 
 impl NN {
-
     /// Each number in the `layers_sizes` parameter specifies a
     /// layer in the network. The number itself is the number of nodes in that
     /// layer. The first number is the input layer, the last
@@ -258,6 +280,7 @@ impl NN {
             learning_mode: Incremental,
             nn: self,
             num_threads: 1,
+            chunk_size: DEFAULT_CHUNK_SIZE,
         }
     }
 
@@ -272,8 +295,9 @@ impl NN {
         network
     }
 
-    fn train_details(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64, log_interval: Option<u32>,
-                    halt_condition: HaltCondition, num_threads: usize) -> f64 {
+    fn train_details(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64,
+                     log_interval: Option<u32>, halt_condition: HaltCondition, num_threads: usize,
+                     learning_mode: LearningMode, chunk_size: usize) -> f64 {
         // check that input and output sizes are correct
         let input_layer_size = self.num_inputs;
         let output_layer_size = self.layers[self.layers.len() - 1].len();
@@ -286,19 +310,68 @@ impl NN {
             }
         }
 
-        self.train_incremental(examples, rate, momentum, log_interval, halt_condition, num_threads)
+        match learning_mode {
+            Incremental => {
+                assert!(num_threads == 1, "incremental training can only be single-threaded");
+                self.train_incremental(examples, rate, momentum, log_interval, halt_condition)
+            },
+            Chunk => self.train_chunk(examples, rate, momentum, log_interval, halt_condition, num_threads, chunk_size),
+        }
     }
 
     fn train_incremental(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64, log_interval: Option<u32>,
-                    halt_condition: HaltCondition, num_threads: usize) -> f64 {
+                    halt_condition: HaltCondition) -> f64 {
         let mut prev_deltas = self.make_weights_tracker(0.0f64);
         let mut epochs = 0u32;
-        let mut training_error_rate = 0f64;
         let start_time = PreciseTime::now();
+        let mut training_error_rate = 0f64;
+        loop {
+            if epochs > 0 {
+                // log error rate if necessary
+                match log_interval {
+                    Some(interval) if epochs % interval == 0 => {
+                        println!("error rate: {}", training_error_rate);
+                    },
+                    _ => (),
+                }
+
+                // check if we've met the halt condition yet
+                match halt_condition {
+                    Epochs(epochs_halt) => {
+                        if epochs == epochs_halt { break }
+                    },
+                    MSE(target_error) => {
+                        if training_error_rate <= target_error { break }
+                    },
+                    Timer(duration) => {
+                        let now = PreciseTime::now();
+                        if start_time.to(now) >= duration { break }
+                    }
+                }
+            }
+
+            training_error_rate = 0f64;
+            for &(ref inputs, ref targets) in examples.iter() {
+                let results = self.do_run(&inputs);
+                let weight_updates = self.calculate_weight_updates(&results, &targets);
+                training_error_rate += calculate_error(&results, &targets);
+                self.update_weights(&weight_updates, &mut prev_deltas, rate, momentum)
+            }
+            epochs += 1;
+        }
+        training_error_rate
+    }
+
+    fn train_chunk(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64, log_interval: Option<u32>,
+                    halt_condition: HaltCondition, num_threads: usize, chunk_size: usize) -> f64 {
+        let mut prev_deltas = self.make_weights_tracker(0.0f64);
+        let mut epochs = 0u32;
+        let start_time = PreciseTime::now();
+        let mut training_error_rate = 0f64;
         let mut pool = Pool::new(num_threads);
+        let self_lock = RwLock::new(self);
 
         loop {
-
             if epochs > 0 {
                 // log error rate if necessary
                 match log_interval {
@@ -327,24 +400,25 @@ impl NN {
 
             let mut error_weights = (0.0, vec![vec![vec![]]]);
             crossbeam::scope(|scope| {
-                error_weights = pool.unordered_map(scope, examples, |&(ref inputs, ref targets)| {
-                    let results = self.do_run(&inputs);
-                    let weight_updates = self.calculate_weight_updates(&results, &targets);
-                    (calculate_error(&results, &targets), weight_updates)
-                })
-                .fold((0.0, self.make_weights_tracker(0.0)), |(mut orig_err, mut orig_weights), (_, (new_err, new_weights))| {
-                    orig_err += new_err;
-                    sum_weights(&mut orig_weights, new_weights);
-                    (orig_err, orig_weights)
-                });
-            });
+                for exs in examples.chunks(chunk_size) {
+                    error_weights = pool.unordered_map(scope, exs, |&(ref inputs, ref targets)| {
+                        let results = self_lock.read().unwrap().do_run(&inputs);
+                        let weight_updates = self_lock.read().unwrap().calculate_weight_updates(&results, &targets);
+                        (calculate_error(&results, &targets), weight_updates)
+                    }).fold((0.0, self_lock.read().unwrap().make_weights_tracker(0.0)), |(mut orig_err, mut orig_weights), (_, (new_err, new_weights))| {
+                        orig_err += new_err;
+                        sum_weights(&mut orig_weights, new_weights);
+                        (orig_err, orig_weights)
+                    });
 
-            let (err, weight_updates) = error_weights;
-            training_error_rate += err;
-            self.update_weights(&weight_updates, &mut prev_deltas, rate, momentum);
+                    let (err, ref weight_updates) = error_weights;
+                    info!("err={:?}", err);
+                    training_error_rate += err;
+                    self_lock.write().unwrap().update_weights(&weight_updates, &mut prev_deltas, rate, momentum);
+                }
+            });
             epochs += 1;
         }
-
         training_error_rate
     }
 
