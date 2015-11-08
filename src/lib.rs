@@ -150,7 +150,8 @@ impl<'a,'b> Trainer<'a,'b>  {
         self
     }
 
-    /// Specifies how often (measured in batches) to log the current error rate (mean squared error) during training.
+    /// Specifies how often (measured in batches) to log the current error rate (mean squared
+    /// error) during training.
     /// `Some(x)` means log after every `x` batches and `None` means never log
     pub fn log_interval(&mut self, log_interval: Option<u32>) -> &mut Trainer<'a,'b> {
         match log_interval {
@@ -166,7 +167,8 @@ impl<'a,'b> Trainer<'a,'b>  {
     /// Specifies when to stop training. `Epochs(x)` will stop the training after
     /// `x` epochs (one epoch is one loop through all of the training examples)
     /// while `MSE(e)` will stop the training when the error rate
-    /// is at or below `e`. `Timer(d)` will halt after the [duration](https://doc.rust-lang.org/time/time/struct.Duration.html) `d` has
+    /// is at or below `e`. `Timer(d)` will halt after the
+    /// [duration](https://doc.rust-lang.org/time/time/struct.Duration.html) `d` has
     /// elapsed.
     pub fn halt_condition(&mut self, halt_condition: HaltCondition) -> &mut Trainer<'a,'b> {
         match halt_condition {
