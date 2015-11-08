@@ -80,6 +80,8 @@ const DEFAULT_EPOCHS: u32 = 1000;
 /// the larger this number, the more examples are tests before actually updating the weights
 /// of the model
 const DEFAULT_CHUNK_SIZE: usize = 10;
+/// Default to single-threaded
+const DEFAULT_NUM_THREADS: usize = 1;
 
 /// Specifies when to stop training the network
 #[derive(Debug, Copy, Clone)]
@@ -107,17 +109,22 @@ pub enum LearningMode {
 /// Used to specify options that dictate how a network will be trained
 #[derive(Debug)]
 pub struct Trainer<'a,'b> {
-    examples: &'b [(Vec<f64>, Vec<f64>)],
+    examples: &'a [(Vec<f64>, Vec<f64>)],
+    nn: &'b mut NN,
+    settings: TrainerSettings,
+}
+
+#[derive(Debug)]
+pub struct TrainerSettings {
     rate: f64,
     momentum: f64,
     log_interval: Option<u32>,
     halt_condition: HaltCondition,
     learning_mode: LearningMode,
-    nn: &'a mut NN,
     num_threads: usize,
     /// number of iterations to process in parallel before updating weights
     /// useful in multi-threading
-    chunk_size: usize,
+    chunk_size: Option<usize>,
 }
 
 /// `Trainer` is used to chain together options that specify how to train a network.
@@ -131,7 +138,7 @@ impl<'a,'b> Trainer<'a,'b>  {
     pub fn rate(&mut self, rate: f64) -> &mut Trainer<'a,'b> {
         assert!(rate > 0.0, "the learning rate must be a positive number");
 
-        self.rate = rate;
+        self.settings.rate = rate;
         self
     }
 
@@ -139,7 +146,7 @@ impl<'a,'b> Trainer<'a,'b>  {
     pub fn momentum(&mut self, momentum: f64) -> &mut Trainer<'a,'b> {
         assert!(momentum > 0.0, "momentum must be a positive number");
 
-        self.momentum = momentum;
+        self.settings.momentum = momentum;
         self
     }
 
@@ -152,8 +159,7 @@ impl<'a,'b> Trainer<'a,'b>  {
             }
             _ => ()
         }
-
-        self.log_interval = log_interval;
+        self.settings.log_interval = log_interval;
         self
     }
 
@@ -169,25 +175,26 @@ impl<'a,'b> Trainer<'a,'b>  {
             _ => {}
         }
 
-        self.halt_condition = halt_condition;
+        self.settings.halt_condition = halt_condition;
         self
     }
-    /// Specifies what [mode](http://en.wikipedia.org/wiki/Backpropagation#Modes_of_learning) to train the network in.
+    /// Specifies what [mode](http://en.wikipedia.org/wiki/Backpropagation#Modes_of_learning)
+    /// to train the network in.
     /// `Incremental` means update the weights in the network after every example.
     pub fn learning_mode(&mut self, learning_mode: LearningMode) -> &mut Trainer<'a,'b> {
-        self.learning_mode = learning_mode;
+        self.settings.learning_mode = learning_mode;
         self
     }
 
     /// Specifies the number of threads to use for training
     pub fn num_threads(&mut self, num_threads: usize) -> &mut Trainer<'a,'b> {
-        self.num_threads = num_threads;
+        self.settings.num_threads = num_threads;
         self
     }
 
     /// Specifies the number of threads to use for training
     pub fn chunk_size(&mut self, chunk_size: usize) -> &mut Trainer<'a,'b> {
-        self.chunk_size = chunk_size;
+        self.settings.chunk_size = Some(chunk_size);
         self
     }
 
@@ -195,16 +202,7 @@ impl<'a,'b> Trainer<'a,'b>  {
     /// options specified. If `go` does not get called, the network will not
     /// get trained!
     pub fn go(&mut self) -> f64 {
-        self.nn.train_details(
-            self.examples,
-            self.rate,
-            self.momentum,
-            self.log_interval,
-            self.halt_condition,
-            self.num_threads,
-            self.learning_mode,
-            self.chunk_size,
-        )
+        self.nn.train_details(self.examples, &self.settings)
     }
 
 }
@@ -273,14 +271,16 @@ impl NN {
     pub fn train<'b>(&'b mut self, examples: &'b [(Vec<f64>, Vec<f64>)]) -> Trainer {
         Trainer {
             examples: examples,
-            rate: DEFAULT_LEARNING_RATE,
-            momentum: DEFAULT_MOMENTUM,
-            log_interval: None,
-            halt_condition: Epochs(DEFAULT_EPOCHS),
-            learning_mode: Incremental,
             nn: self,
-            num_threads: 1,
-            chunk_size: DEFAULT_CHUNK_SIZE,
+            settings: TrainerSettings {
+                rate: DEFAULT_LEARNING_RATE,
+                momentum: DEFAULT_MOMENTUM,
+                log_interval: None,
+                halt_condition: Epochs(DEFAULT_EPOCHS),
+                learning_mode: Incremental,
+                num_threads: DEFAULT_NUM_THREADS,
+                chunk_size: Some(DEFAULT_CHUNK_SIZE),
+            }
         }
     }
 
@@ -295,13 +295,12 @@ impl NN {
         network
     }
 
-    fn train_details(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64,
-                     log_interval: Option<u32>, halt_condition: HaltCondition, num_threads: usize,
-                     learning_mode: LearningMode, chunk_size: usize) -> f64 {
-        // check that input and output sizes are correct
+    fn train_details<'a, 'b>(&'a mut self, examples: &'b [(Vec<f64>, Vec<f64>)],
+                             trainer_settings: &TrainerSettings) -> f64 {
         let input_layer_size = self.num_inputs;
         let output_layer_size = self.layers[self.layers.len() - 1].len();
         for &(ref inputs, ref outputs) in examples.iter() {
+            // check that input and output sizes are correct
             if inputs.len() as u32 != input_layer_size {
                 panic!("input has a different length than the network's input layer");
             }
@@ -310,17 +309,16 @@ impl NN {
             }
         }
 
-        match learning_mode {
+        match trainer_settings.learning_mode {
             Incremental => {
-                assert!(num_threads == 1, "incremental training can only be single-threaded");
-                self.train_incremental(examples, rate, momentum, log_interval, halt_condition)
+                assert!(trainer_settings.num_threads == 1, "incremental training can only be single-threaded");
+                self.train_incremental(examples, trainer_settings)
             },
-            Chunk => self.train_chunk(examples, rate, momentum, log_interval, halt_condition, num_threads, chunk_size),
+            Chunk => self.train_chunk(examples, trainer_settings)
         }
     }
 
-    fn train_incremental(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64, log_interval: Option<u32>,
-                    halt_condition: HaltCondition) -> f64 {
+    fn train_incremental(&mut self, examples: &[(Vec<f64>, Vec<f64>)], trainer_settings: &TrainerSettings) -> f64 {
         let mut prev_deltas = self.make_weights_tracker(0.0f64);
         let mut epochs = 0u32;
         let start_time = PreciseTime::now();
@@ -328,7 +326,7 @@ impl NN {
         loop {
             if epochs > 0 {
                 // log error rate if necessary
-                match log_interval {
+                match trainer_settings.log_interval {
                     Some(interval) if epochs % interval == 0 => {
                         println!("error rate: {}", training_error_rate);
                     },
@@ -336,7 +334,7 @@ impl NN {
                 }
 
                 // check if we've met the halt condition yet
-                match halt_condition {
+                match trainer_settings.halt_condition {
                     Epochs(epochs_halt) => {
                         if epochs == epochs_halt { break }
                     },
@@ -355,26 +353,27 @@ impl NN {
                 let results = self.do_run(&inputs);
                 let weight_updates = self.calculate_weight_updates(&results, &targets);
                 training_error_rate += calculate_error(&results, &targets);
-                self.update_weights(&weight_updates, &mut prev_deltas, rate, momentum)
+                self.update_weights(&weight_updates, &mut prev_deltas,
+                                    trainer_settings.rate, trainer_settings.momentum)
             }
             epochs += 1;
         }
         training_error_rate
     }
 
-    fn train_chunk(&mut self, examples: &[(Vec<f64>, Vec<f64>)], rate: f64, momentum: f64, log_interval: Option<u32>,
-                    halt_condition: HaltCondition, num_threads: usize, chunk_size: usize) -> f64 {
+    fn train_chunk(&mut self, examples: &[(Vec<f64>, Vec<f64>)], trainer_settings: &TrainerSettings) -> f64 {
         let mut prev_deltas = self.make_weights_tracker(0.0f64);
         let mut epochs = 0u32;
         let start_time = PreciseTime::now();
         let mut training_error_rate = 0f64;
-        let mut pool = Pool::new(num_threads);
+        let mut pool = Pool::new(trainer_settings.num_threads);
         let self_lock = RwLock::new(self);
+        let chunk_size = trainer_settings.chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE);
 
         loop {
             if epochs > 0 {
                 // log error rate if necessary
-                match log_interval {
+                match trainer_settings.log_interval {
                     Some(interval) if epochs % interval == 0 => {
                         println!("error rate: {}", training_error_rate);
                     },
@@ -382,7 +381,7 @@ impl NN {
                 }
 
                 // check if we've met the halt condition yet
-                match halt_condition {
+                match trainer_settings.halt_condition {
                     Epochs(epochs_halt) => {
                         if epochs == epochs_halt { break }
                     },
@@ -414,7 +413,9 @@ impl NN {
                     let (err, ref weight_updates) = error_weights;
                     info!("err={:?}", err);
                     training_error_rate += err;
-                    self_lock.write().unwrap().update_weights(&weight_updates, &mut prev_deltas, rate, momentum);
+                    self_lock.write().unwrap().update_weights(&weight_updates, &mut prev_deltas,
+                                                              trainer_settings.rate,
+                                                              trainer_settings.momentum);
                 }
             });
             epochs += 1;
