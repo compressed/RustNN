@@ -60,7 +60,6 @@ extern crate rustc_serialize;
 extern crate time;
 extern crate crossbeam;
 extern crate simple_parallel;
-extern crate env_logger;
 #[macro_use] extern crate log;
 
 use simple_parallel::Pool;
@@ -330,7 +329,7 @@ impl NN {
                 // log error rate if necessary
                 match trainer_settings.log_interval {
                     Some(interval) if epochs % interval == 0 => {
-                        println!("error rate: {}", training_error_rate);
+                        info!("error rate: {}", training_error_rate);
                     },
                     _ => (),
                 }
@@ -377,7 +376,7 @@ impl NN {
                 // log error rate if necessary
                 match trainer_settings.log_interval {
                     Some(interval) if epochs % interval == 0 => {
-                        println!("error rate: {}", training_error_rate);
+                        info!("error rate: {}", training_error_rate);
                     },
                     _ => (),
                 }
@@ -413,7 +412,6 @@ impl NN {
                     });
 
                     let (err, ref weight_updates) = error_weights;
-                    info!("err={:?}", err);
                     training_error_rate += err;
                     self_lock.write().unwrap().update_weights(&weight_updates, &mut prev_deltas,
                                                               trainer_settings.rate,
