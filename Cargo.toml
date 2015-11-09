@@ -10,10 +10,12 @@ repository = "https://github.com/jackm321/RustNN"
 version = "0.1.6"
 
 [dependencies]
-crossbeam = "0.1.5"
+crossbeam = "0.1"
 rand = "0.3"
-rustc-serialize = "0.3.12"
-simple_parallel = "0.3.0"
+rustc-serialize = "0.3"
+simple_parallel = "0.3"
 time = "0.1"
-env_logger = "*"
-log = "*"
+log = "0.3"
+
+[dev-dependencies]
+env_logger = "0.3"
