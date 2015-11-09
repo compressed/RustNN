@@ -3,20 +3,23 @@
 extern crate nn;
 extern crate time;
 extern crate test;
+extern crate rand;
 
 use nn::{NN, HaltCondition, LearningMode};
 use test::Bencher;
+use rand::distributions::{IndependentSample, Range};
+
+const INPUT_SIZE: u32 = 10_000;
 
 #[bench]
 fn single_threaded(b: &mut Bencher) {
     let examples = get_examples();
 
     b.iter(|| {
-        // create a new neural network
-        let mut net = NN::new(&[2,3,3,1]);
+        let mut net = NN::new(&[INPUT_SIZE,2,50,10]);
 
         net.train(&examples)
-            .halt_condition( HaltCondition::Epochs(5) )
+            .halt_condition( HaltCondition::Epochs(1) )
             .learning_mode( LearningMode::Incremental )
             .momentum(0.1)
             .go();
@@ -28,26 +31,28 @@ fn multi_threaded(b: &mut Bencher) {
     let examples = get_examples();
 
     b.iter(|| {
-        // create a new neural network
-        let mut net = NN::new(&[2,3,3,1]);
+        let mut net = NN::new(&[INPUT_SIZE,2,50,10]);
 
         net.train(&examples)
-            .halt_condition( HaltCondition::Epochs(5) )
-            .learning_mode( LearningMode::Incremental )
+            .halt_condition( HaltCondition::Epochs(1) )
+            .learning_mode( LearningMode::Chunk )
             .momentum(0.1)
-            .num_threads(4)
+            .num_threads(3)
+            .chunk_size(100)
             .go();
     })
 }
 
 fn get_examples() -> Vec<(Vec<f64>, Vec<f64>)> {
-    let mut examples = vec![];
+    let between = Range::new(-1.0, 1.0);
+    let mut rng = rand::thread_rng();
+
+    let mut examples = Vec::with_capacity(100);
 
     for _ in 0..100 {
-        examples.push((vec![0f64, 0f64], vec![0f64]));
-        examples.push((vec![0f64, 1f64], vec![1f64]));
-        examples.push((vec![1f64, 0f64], vec![1f64]));
-        examples.push((vec![1f64, 1f64], vec![0f64]));
+        let input = (0..INPUT_SIZE).map(|_| between.ind_sample(&mut rng)).collect::<Vec<f64>>();
+        let output = (0..10).map(|_| between.ind_sample(&mut rng)).collect::<Vec<f64>>();
+        examples.push((input, output));
     }
 
     examples
