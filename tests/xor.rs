@@ -1,10 +1,12 @@
 extern crate nn;
 extern crate time;
+extern crate env_logger;
 
 use nn::{NN, HaltCondition, LearningMode};
 
 #[test]
 fn xor_4layers() {
+    let _ = env_logger::init();
     // create examples of the xor function
     let examples = [
         (vec![0f64, 0f64], vec![0f64]),
@@ -38,20 +40,9 @@ fn xor_4layers() {
 
 #[test]
 fn xor_4layers_multithreaded() {
+    let _ = env_logger::init();
     // create examples of the xor function
     let examples = [
-        (vec![0f64, 0f64], vec![0f64]),
-        (vec![0f64, 1f64], vec![1f64]),
-        (vec![1f64, 0f64], vec![1f64]),
-        (vec![1f64, 1f64], vec![0f64]),
-        (vec![0f64, 0f64], vec![0f64]),
-        (vec![0f64, 1f64], vec![1f64]),
-        (vec![1f64, 0f64], vec![1f64]),
-        (vec![1f64, 1f64], vec![0f64]),
-        (vec![0f64, 0f64], vec![0f64]),
-        (vec![0f64, 1f64], vec![1f64]),
-        (vec![1f64, 0f64], vec![1f64]),
-        (vec![1f64, 1f64], vec![0f64]),
         (vec![0f64, 0f64], vec![0f64]),
         (vec![0f64, 1f64], vec![1f64]),
         (vec![1f64, 0f64], vec![1f64]),
@@ -63,8 +54,9 @@ fn xor_4layers_multithreaded() {
 
     // train the network
     net1.train(&examples)
+        .log_interval(Some(1000))
         .halt_condition( HaltCondition::MSE(0.01) )
-        .learning_mode( LearningMode::Incremental )
+        .learning_mode( LearningMode::Chunk )
         .momentum(0.1)
         .num_threads(4)
         .go();
